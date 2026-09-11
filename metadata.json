@@ -1,0 +1,6 @@
+{
+  "name": "Flood Intelligence",
+  "description": "Geo-Intelligent Coastal & Urban Flood Intelligence platform for real-time monitoring and alerting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
