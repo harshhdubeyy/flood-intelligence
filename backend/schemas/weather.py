@@ -11,9 +11,9 @@ class WeatherSnapshotBase(BaseModel):
     """Base weather telemetry properties."""
     ward_id: Optional[str] = Field(None, description="Ward identifier (e.g., MH-BMC-GN)")
     source: str = Field(default="open-meteo", description="Provider source: openweathermap or open-meteo")
-    rainfall_1h_mm: float = Field(default=0.0, description="Precipitation in last 1 hour in mm")
-    rainfall_3h_mm: float = Field(default=0.0, description="Precipitation in last 3 hours in mm")
-    rainfall_24h_mm: float = Field(default=0.0, description="Precipitation in last 24 hours in mm")
+    rainfall_1h_mm: Optional[float] = None
+    rainfall_3h_mm: Optional[float] = None
+    rainfall_24h_mm: Optional[float] = None
     wind_speed_kmh: float = Field(default=0.0, description="Sustained wind velocity in km/h")
     humidity_pct: float = Field(default=0.0, description="Relative humidity percentage")
     tide_height_m: Optional[float] = Field(None, description="Active Arabian Sea tidal water level in meters")

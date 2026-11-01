@@ -128,7 +128,7 @@ class WeatherIngestService:
         Execute full batch ingestion across all administrative wards in Mumbai:
         1. Queries ward centroid geometries via PostGIS ST_Centroid
         2. Retrieves live weather (Open-Meteo + OpenWeatherMap)
-        3. Computes 1h, 3h, 24h precipitation accumulations
+        3. Separates observed rainfall from forecast precipitation
         4. Saves snapshots to database and updates Redis cache
         """
         r = await self.get_redis()
@@ -164,37 +164,82 @@ class WeatherIngestService:
                     wind_series: List[float] = hourly.get("wind_speed_10m", [])
                     humidity_series: List[float] = hourly.get("relative_humidity_2m", [])
 
-                    # Estimate accumulations
-                    rain_1h = float(rain_series[0]) if rain_series else 0.0
-                    rain_3h = float(sum(rain_series[:3])) if len(rain_series) >= 3 else rain_1h * 3
-                    rain_24h = float(sum(rain_series[:24])) if len(rain_series) >= 24 else rain_1h * 24
-                    wind_kmh = float(wind_series[0]) if wind_series else 18.0
-                    humidity = float(humidity_series[0]) if humidity_series else 75.0
+                    
+                    # Open-Meteo hourly values are forecasts, not historical observations.
+                    forecast_rain_6h = (
+                        round(float(sum(rain_series[:6])), 2)
+                        if len(rain_series) >= 6 else None
+                    )
+                    forecast_rain_12h = (
+                        round(float(sum(rain_series[:12])), 2)
+                        if len(rain_series) >= 12 else None
+                    )
+                    forecast_rain_24h = (
+                        round(float(sum(rain_series[:24])), 2)
+                        if len(rain_series) >= 24 else None
+                    )
 
-                    # Optional OWM check
-                    owm_data = await self.fetch_openweathermap_current(client, lat, lon)
+                    # Only use OpenWeatherMap's current observation for observed rainfall.
+                    owm_data = await self.fetch_openweathermap_current(
+                        client, lat, lon
+                    )
+
+                    observed_rain_1h = None
+                    observed_wind_kmh = None
+                    observed_humidity = None
+
                     if owm_data:
-                        rain_obj = owm_data.get("rain", {})
-                        if "1h" in rain_obj:
-                            rain_1h = max(rain_1h, float(rain_obj["1h"]))
-                        if "wind" in owm_data and "speed" in owm_data["wind"]:
-                            wind_kmh = max(wind_kmh, float(owm_data["wind"]["speed"]) * 3.6)
-                        if "main" in owm_data and "humidity" in owm_data["main"]:
-                            humidity = float(owm_data["main"]["humidity"])
+                        rain_obj = owm_data.get("rain") or {}
+                        if rain_obj.get("1h") is not None:
+                            observed_rain_1h = float(rain_obj["1h"])
 
+                        wind = owm_data.get("wind") or {}
+                        if wind.get("speed") is not None:
+                            observed_wind_kmh = float(wind["speed"]) * 3.6
+
+                        main = owm_data.get("main") or {}
+                        if main.get("humidity") is not None:
+                            observed_humidity = float(main["humidity"])
+
+                    # Tide is still an estimate, not a measured observation.
                     tide_m = self.estimate_tide_height(is_coastal)
+
+                    source_parts = []
+                    if owm_data:
+                        source_parts.append("openweathermap-current")
+                    if meteo_data:
+                        source_parts.append("open-meteo-forecast")
+                    source = (
+                                "owm+open-meteo"
+                                if owm_data and meteo_data
+                                else "owm-current"
+                                if owm_data
+                                else "open-meteo"
+                                if meteo_data
+                                else "unavailable"
+                            )
 
                     snapshot = WeatherSnapshot(
                         ward_id=row.ward_id,
-                        source="open-meteo" if not owm_data else "openweathermap+open-meteo",
-                        rainfall_1h_mm=round(rain_1h, 2),
-                        rainfall_3h_mm=round(rain_3h, 2),
-                        rainfall_24h_mm=round(rain_24h, 2),
-                        wind_speed_kmh=round(wind_kmh, 1),
-                        humidity_pct=round(humidity, 1),
+                        source=source,
+                        rainfall_1h_mm=(
+                            round(observed_rain_1h, 2)
+                            if observed_rain_1h is not None else None
+                        ),
+                        rainfall_3h_mm=None,
+                        rainfall_24h_mm=None,
+                        wind_speed_kmh=(
+                            round(observed_wind_kmh, 1)
+                            if observed_wind_kmh is not None else None
+                        ),
+                        humidity_pct=(
+                            round(observed_humidity, 1)
+                            if observed_humidity is not None else None
+                        ),
                         tide_height_m=tide_m,
                         fetched_at=datetime.now(timezone.utc)
                     )
+
                     session.add(snapshot)
                     snapshots_created += 1
 
@@ -202,18 +247,25 @@ class WeatherIngestService:
                     if r is not None:
                         try:
                             import json
+
                             cache_payload = {
-                                "rainfall_1h_mm": rain_1h,
-                                "rainfall_3h_mm": rain_3h,
-                                "rainfall_24h_mm": rain_24h,
-                                "wind_speed_kmh": wind_kmh,
-                                "humidity_pct": humidity,
+                                "observed_rainfall_1h_mm": observed_rain_1h,
+                                "observed_wind_speed_kmh": observed_wind_kmh,
+                                "observed_humidity_pct": observed_humidity,
+                                "forecast_rain_6h_mm": forecast_rain_6h,
+                                "forecast_rain_12h_mm": forecast_rain_12h,
+                                "forecast_rain_24h_mm": forecast_rain_24h,
                                 "tide_height_m": tide_m,
-                                "forecast_rain_6h_mm": round(float(sum(rain_series[:6])), 2) if len(rain_series) >= 6 else 0.0,
-                                "forecast_rain_12h_mm": round(float(sum(rain_series[:12])), 2) if len(rain_series) >= 12 else 0.0,
+                                "tide_source": "simulated_harmonic_estimate",
                                 "fetched_at": datetime.now(timezone.utc).isoformat()
                             }
-                            await r.setex(f"fip:weather:latest:{row.ward_id}", 900, json.dumps(cache_payload))
+
+                            await r.setex(
+                                f"fip:weather:latest:{row.ward_id}",
+                                900,
+                                json.dumps(cache_payload)
+                            )
+
                         except Exception as e:
                             logger.debug(f"Redis cache write error for {row.ward_id}: {e}")
 

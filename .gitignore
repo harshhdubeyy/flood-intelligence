@@ -53,3 +53,10 @@ flood_reports/
 # Coverage
 .coverage
 htmlcov/
+# Flood intelligence datasets (keep locally)
+backend/data/raw/*.csv
+backend/data/processed/*.csv
+backend/data/metadata/*.json
+
+# TypeScript build cache
+frontend/tsconfig.tsbuildinfo

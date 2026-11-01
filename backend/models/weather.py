@@ -29,9 +29,9 @@ class WeatherSnapshot(Base):
         index=True
     )
     source: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # 'openweathermap' | 'open-meteo'
-    rainfall_1h_mm: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
-    rainfall_3h_mm: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
-    rainfall_24h_mm: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    rainfall_1h_mm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rainfall_3h_mm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rainfall_24h_mm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     wind_speed_kmh: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     humidity_pct: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     tide_height_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
