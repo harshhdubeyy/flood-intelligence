@@ -60,3 +60,11 @@ backend/data/metadata/*.json
 
 # TypeScript build cache
 frontend/tsconfig.tsbuildinfo
+
+# Generated TypeScript build cache
+*.tsbuildinfo
+
+# Local flood intelligence datasets and generated artifacts
+backend/data/flood_events/*.csv
+backend/data/flood_events/*report*.json
+backend/data/social/

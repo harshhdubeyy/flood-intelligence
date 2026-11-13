@@ -1,63 +1,17 @@
-"""
-Social media intelligence ingestion and stream processing pipeline.
-Ingests from X/Twitter API, Telegram disaster channels, and BMC 1916 Helpline,
-runs Engine C NLP classification, and populates the operational data cache.
+"""Legacy classifier for previously stored SocialSignal records.
+
+Public collection is implemented separately and does not invoke this module.
 """
 
 import uuid
-import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.config import get_settings
 from backend.models.social import SocialSignal
 from backend.models.ward import Ward
 from backend.ml.engine_c.nlp_classifier import nlp_classifier
-
-logger = logging.getLogger("fip.social_ingest")
-settings = get_settings()
-
-SAMPLE_SIMULATION_POSTS = [
-    {
-        "source": "twitter",
-        "author_handle": "@MumbaiRainLive",
-        "content_text": "Waterlogging reported at Hindmata Cinema and Dadar TT Circle. Water level above knee height. Avoid Dr Babasaheb Ambedkar Road.",
-        "posted_at": datetime.now(timezone.utc)
-    },
-    {
-        "source": "telegram",
-        "author_handle": "@BMC_Ward_Alerts",
-        "content_text": "अतिदक्षता: कुर्ला कमानी आणि बैल बाजार परिसरात नाला ओसंडून वाहत आहे. घरात पाणी शिरले असून मदतीची गरज आहे! जीव वाचवा!",
-        "posted_at": datetime.now(timezone.utc)
-    },
-    {
-        "source": "helpline_1916",
-        "author_handle": "Citizen-Helpline-9820",
-        "content_text": "Milan subway closed due to 4 feet water. 2 BEST buses stalled inside subway. Immediate evacuation needed.",
-        "posted_at": datetime.now(timezone.utc)
-    },
-    {
-        "source": "twitter",
-        "author_handle": "@DharaviTimes",
-        "content_text": "Mithi river water level rising dangerously near Kranti Nagar. Slum dwellers moving to upper floors. Urgent boats requested.",
-        "posted_at": datetime.now(timezone.utc)
-    },
-    {
-        "source": "twitter",
-        "author_handle": "@Mumbaikar_99",
-        "content_text": "Gandhi Market Sion completely flooded. King's Circle traffic halted. Heavy rains non-stop for last 3 hours.",
-        "posted_at": datetime.now(timezone.utc)
-    },
-    {
-        "source": "telegram",
-        "author_handle": "@Mumbai_Updates",
-        "content_text": "अंधेरी सबवे पाण्याखाली. वेस्टर्न एक्सप्रेस हायवेवर प्रचंड ट्रॅफिक जाम. पाऊस सतत सुरू.",
-        "posted_at": datetime.now(timezone.utc)
-    }
-]
-
 
 class SocialIngestPipeline:
     """
@@ -131,22 +85,5 @@ class SocialIngestPipeline:
                 #logger.debug(f"Redis social update error: {e}")
 
         return signal
-
-    async def ingest_simulation_batch(self, db: AsyncSession) -> List[SocialSignal]:
-        """
-        Seeds initial realistic flood social signals for testing and demonstration.
-        """
-        created = []
-        for post in SAMPLE_SIMULATION_POSTS:
-            sig = await self.process_and_store_signal(
-                db=db,
-                source=post["source"],
-                content_text=post["content_text"],
-                author_handle=post["author_handle"],
-                posted_at=post["posted_at"]
-            )
-            created.append(sig)
-        return created
-
 
 social_ingest_pipeline = SocialIngestPipeline()

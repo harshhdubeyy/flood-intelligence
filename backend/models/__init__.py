@@ -4,8 +4,21 @@ from backend.models.ward import Ward
 from backend.models.weather import WeatherSnapshot
 from backend.models.risk import WardRiskScore
 from backend.models.report import CitizenReport
-from backend.models.alert import AlertDispatched
+from backend.models.flood_event import FloodEvent, FloodEventVerificationHistory
+from backend.models.alert import (
+    AlertDispatched,
+    CitizenSubscription,
+    AlertDelivery,
+    AlertAuditLog,
+)
 from backend.models.social import SocialSignal
+from backend.models.social_media_post import (
+    SocialCollectionRun,
+    SocialComplianceOperation,
+    SocialComplianceTombstone,
+    SocialMediaPost,
+    SocialPostDerivedArtifact,
+)
 
 __all__ = [
     "Base",
@@ -16,7 +29,16 @@ __all__ = [
     "WeatherObservation",
     "WardRiskScore",
     "CitizenReport",
+    "FloodEvent",
+    "FloodEventVerificationHistory",
     "AlertDispatched",
+    "CitizenSubscription",
+    "AlertDelivery",
+    "AlertAuditLog",
     "SocialSignal",
+    "SocialMediaPost",
+    "SocialCollectionRun",
+    "SocialPostDerivedArtifact",
+    "SocialComplianceTombstone",
+    "SocialComplianceOperation",
 ]
-

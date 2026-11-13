@@ -190,3 +190,10 @@ class WardRiskHistoryResponse(BaseModel):
     ]
 
     history_24h: List[WardRiskItem]
+
+    citizen_intelligence: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Citizen report intelligence overlay (independent from ML risk score)",
+    )
+
+    model_config = ConfigDict(from_attributes=True)

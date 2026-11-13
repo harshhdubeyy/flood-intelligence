@@ -3,12 +3,15 @@ SQLAlchemy ORM model for Ward Risk Scores.
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from sqlalchemy import String, Integer, Float, DateTime, ForeignKey, CheckConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.models.database import Base
+
+if TYPE_CHECKING:
+    from backend.models.ward import Ward
 
 
 class WardRiskScore(Base):

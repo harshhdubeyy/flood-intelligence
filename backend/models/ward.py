@@ -2,12 +2,15 @@
 SQLAlchemy ORM model for Mumbai Municipal Administrative Wards.
 """
 
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import String, Integer, Float, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry
 
 from backend.models.database import Base
+
+if TYPE_CHECKING:
+    from backend.models.risk import WardRiskScore
 
 
 class Ward(Base):
@@ -27,9 +30,9 @@ class Ward(Base):
     )
     area_sqkm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     population: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    is_coastal: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_coastal: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     avg_elevation_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    drainage_index: Mapped[float] = mapped_column(Float, default=0.5, server_default="0.5")
+    drainage_index: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Relationships
     risk_scores: Mapped[List["WardRiskScore"]] = relationship(  # noqa: F821

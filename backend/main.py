@@ -10,8 +10,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from fastapi import FastAPI, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+import os
 
 from backend.config import get_settings, Settings
 from backend.models.database import get_db
@@ -23,6 +25,8 @@ from backend.api.routes.alerts import router as alerts_router
 from backend.api.routes.social import router as social_router
 from backend.api.routes.signals import signals_router
 from backend.api.routes.routing import routing_router
+from backend.api.routes.intelligence import router as intelligence_router
+from backend.api.routes.predictions import router as predictions_router
 from backend.api.websocket import websocket_router
 
 settings = get_settings()
@@ -75,7 +79,14 @@ app.include_router(alerts_router, prefix="/v1")
 app.include_router(social_router, prefix="/v1")
 app.include_router(signals_router, prefix="/v1")
 app.include_router(routing_router, prefix="/v1")
+app.include_router(intelligence_router, prefix="/v1")
+app.include_router(predictions_router, prefix="/v1")
 app.include_router(websocket_router)
+
+# Serve uploaded report images (local development)
+_upload_dir = "/tmp/flood_reports"
+os.makedirs(_upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_upload_dir), name="uploads")
 
 
 @app.get(

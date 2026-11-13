@@ -1,96 +1,106 @@
 """
 ML Engine C: Multilingual Flood NLP & Social Urgency Classifier.
-Processes English, Marathi, and Hindi citizen posts, detects geographical
-landmarks mapped to Mumbai administrative wards, and classifies distress urgency per TRD Section 7.3.
+Processes English, Marathi, and Hindi citizen posts and public social records,
+detects geographical landmarks mapped to Mumbai administrative wards, and
+classifies distress urgency per TRD Section 7.3.
+
+Note on AI provenance: This pipeline uses a calibrated multilingual gazetteer,
+morphological Devanagari markers, and heuristic urgency weighting (heuristic-indic-urgency-v1).
+It does not claim deep transformer-based inference (IndicBERT) since fine-tuned
+transformer model weights are not packaged in this deployment.
 """
 
-import re
+from __future__ import annotations
+
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("fip.engine_c")
 
 # Mumbai Landmark-to-Ward Spatial Gazetteer with Canonical Names
 MUMBAI_LANDMARK_MAP: Dict[str, Tuple[str, str]] = {
     # Ward F/North (Sion, Matunga, Wadala)
-    "sion": ("MH-BMC-FN", "Sion"),
-    "सायन": ("MH-BMC-FN", "Sion"),
-    "king's circle": ("MH-BMC-FN", "King's Circle"),
-    "kings circle": ("MH-BMC-FN", "King's Circle"),
-    "gandhi market": ("MH-BMC-FN", "Gandhi Market"),
-    "गांधी मार्केट": ("MH-BMC-FN", "Gandhi Market"),
-    "matunga": ("MH-BMC-FN", "Matunga"),
-    "माटुंगा": ("MH-BMC-FN", "Matunga"),
-    "wadala": ("MH-BMC-FN", "Wadala"),
-    "वडाळा": ("MH-BMC-FN", "Wadala"),
+    "sion": ("BMC-FN", "Sion"),
+    "सायन": ("BMC-FN", "Sion"),
+    "king's circle": ("BMC-FN", "King's Circle"),
+    "kings circle": ("BMC-FN", "King's Circle"),
+    "gandhi market": ("BMC-FN", "Gandhi Market"),
+    "गांधी मार्केट": ("BMC-FN", "Gandhi Market"),
+    "matunga": ("BMC-FN", "Matunga"),
+    "माटुंगा": ("BMC-FN", "Matunga"),
+    "wadala": ("BMC-FN", "Wadala"),
+    "वडाळा": ("BMC-FN", "Wadala"),
 
     # Ward G/North (Dharavi, Dadar, Mahim)
-    "hindmata": ("MH-BMC-GN", "Hindmata"),
-    "हिंदमाता": ("MH-BMC-GN", "Hindmata"),
-    "dadar": ("MH-BMC-GN", "Dadar"),
-    "दादर": ("MH-BMC-GN", "Dadar"),
-    "dharavi": ("MH-BMC-GN", "Dharavi"),
-    "धारावी": ("MH-BMC-GN", "Dharavi"),
-    "mahim": ("MH-BMC-GN", "Mahim"),
-    "माहिम": ("MH-BMC-GN", "Mahim"),
-    "mithi river": ("MH-BMC-GN", "Mithi River"),
-    "mithi": ("MH-BMC-GN", "Mithi River"),
-    "मिठी नदी": ("MH-BMC-GN", "Mithi River"),
-    "shahu nagar": ("MH-BMC-GN", "Shahu Nagar"),
+    "hindmata": ("BMC-GN", "Hindmata"),
+    "हिंदमाता": ("BMC-GN", "Hindmata"),
+    "dadar": ("BMC-GN", "Dadar"),
+    "दादर": ("BMC-GN", "Dadar"),
+    "dharavi": ("BMC-GN", "Dharavi"),
+    "धारावी": ("BMC-GN", "Dharavi"),
+    "mahim": ("BMC-GN", "Mahim"),
+    "माहिम": ("BMC-GN", "Mahim"),
+    "mithi river": ("BMC-GN", "Mithi River"),
+    "mithi": ("BMC-GN", "Mithi River"),
+    "मिठी नदी": ("BMC-GN", "Mithi River"),
+    "shahu nagar": ("BMC-GN", "Shahu Nagar"),
 
     # Ward L (Kurla, Kalina, Chunabhatti border)
-    "kurla": ("MH-BMC-L", "Kurla"),
-    "कुर्ला": ("MH-BMC-L", "Kurla"),
-    "kamani": ("MH-BMC-L", "Kamani"),
-    "कमानी": ("MH-BMC-L", "Kamani"),
-    "bail bazaar": ("MH-BMC-L", "Bail Bazaar"),
-    "बैल बाजार": ("MH-BMC-L", "Bail Bazaar"),
-    "kalina": ("MH-BMC-L", "Kalina"),
-    "कलिना": ("MH-BMC-L", "Kalina"),
+    "kurla": ("BMC-L", "Kurla"),
+    "कुर्ला": ("BMC-L", "Kurla"),
+    "kamani": ("BMC-L", "Kamani"),
+    "कमानी": ("BMC-L", "Kamani"),
+    "bail bazaar": ("BMC-L", "Bail Bazaar"),
+    "बैल बाजार": ("BMC-L", "Bail Bazaar"),
+    "kalina": ("BMC-L", "Kalina"),
+    "कलिना": ("BMC-L", "Kalina"),
 
     # Ward K/West (Andheri West, Juhu, Versova)
-    "andheri subway": ("MH-BMC-KW", "Andheri Subway"),
-    "andheri": ("MH-BMC-KW", "Andheri"),
-    "अंधेरी सबवे": ("MH-BMC-KW", "Andheri Subway"),
-    "अंधेरी": ("MH-BMC-KW", "Andheri"),
-    "milan subway": ("MH-BMC-HW", "Milan Subway"),
-    "मिलन सबवे": ("MH-BMC-HW", "Milan Subway"),
-    "juhu circle": ("MH-BMC-KW", "Juhu Circle"),
-    "versova": ("MH-BMC-KW", "Versova"),
+    "andheri subway": ("BMC-KW", "Andheri Subway"),
+    "andheri": ("BMC-KW", "Andheri"),
+    "अंधेरी सबवे": ("BMC-KW", "Andheri Subway"),
+    "अंधेरी": ("BMC-KW", "Andheri"),
+    "milan subway": ("BMC-HW", "Milan Subway"),
+    "मिलन सबवे": ("BMC-HW", "Milan Subway"),
+    "juhu circle": ("BMC-KW", "Juhu Circle"),
+    "versova": ("BMC-KW", "Versova"),
 
     # Ward K/East (Andheri East, Sakinaka, Marol)
-    "sakinaka": ("MH-BMC-KE", "Sakinaka"),
-    "साकीनाका": ("MH-BMC-KE", "Sakinaka"),
-    "marol": ("MH-BMC-KE", "Marol"),
-    "मरोळ": ("MH-BMC-KE", "Marol"),
-    "chakala": ("MH-BMC-KE", "Chakala"),
+    "sakinaka": ("BMC-KE", "Sakinaka"),
+    "साकीनाका": ("BMC-KE", "Sakinaka"),
+    "marol": ("BMC-KE", "Marol"),
+    "मरोळ": ("BMC-KE", "Marol"),
+    "chakala": ("BMC-KE", "Chakala"),
 
     # Ward M/East (Govandi, Mankhurd, Chembur)
-    "chembur": ("MH-BMC-ME", "Chembur"),
-    "चेंबूर": ("MH-BMC-ME", "Chembur"),
-    "chunabhatti": ("MH-BMC-FN", "Chunabhatti"),
-    "चुनाभट्टी": ("MH-BMC-FN", "Chunabhatti"),
-    "govandi": ("MH-BMC-ME", "Govandi"),
+    "chembur": ("BMC-MW", "Chembur"),
+    "चेंबूर": ("BMC-MW", "Chembur"),
+    "chunabhatti": ("BMC-FN", "Chunabhatti"),
+    "चुनाभट्टी": ("BMC-FN", "Chunabhatti"),
+    "govandi": ("BMC-ME", "Govandi"),
 
     # Ward H/West & H/East (Bandra, Khar, Santacruz)
-    "bandra": ("MH-BMC-HW", "Bandra"),
-    "वांद्रे": ("MH-BMC-HW", "Bandra"),
-    "kalanagar": ("MH-BMC-HE", "Kalanagar"),
-    "khar subway": ("MH-BMC-HW", "Khar Subway"),
-    "santacruz": ("MH-BMC-HE", "Santacruz"),
+    "bandra": ("BMC-HW", "Bandra"),
+    "वांद्रे": ("BMC-HW", "Bandra"),
+    "kalanagar": ("BMC-HE", "Kalanagar"),
+    "khar subway": ("BMC-HW", "Khar Subway"),
+    "santacruz": ("BMC-HE", "Santacruz"),
 
     # Ward A (Colaba, Fort, Marine Drive)
-    "colaba": ("MH-BMC-A", "Colaba"),
-    "कोलाबा": ("MH-BMC-A", "Colaba"),
-    "marine drive": ("MH-BMC-A", "Marine Drive"),
-    "churchgate": ("MH-BMC-A", "Churchgate"),
-    "cuffe parade": ("MH-BMC-A", "Cuffe Parade"),
+    "colaba": ("BMC-A", "Colaba"),
+    "कोलाबा": ("BMC-A", "Colaba"),
+    "marine drive": ("BMC-A", "Marine Drive"),
+    "churchgate": ("BMC-A", "Churchgate"),
+    "cuffe parade": ("BMC-A", "Cuffe Parade"),
 }
 
 # Multilingual Urgency Lexicon
 KEYWORDS_EVACUATION = [
     # English
-    "evacuate", "evacuation", "evacuating", "trapped", "stranded", "rescue", "drowning", "saving lives", "send boat", "roof", "submerged house",
+    "evacuate", "evacuation", "evacuating", "trapped", "stranded", "rescue", "drowning",
+    "saving lives", "send boat", "roof", "submerged house",
     # Marathi
     "जीव वाचवा", "मदत हवी", "अडकले", "बोट पाठवा", "घरात पाणी", "छतावर", "वाचवा", "वाहून गेले",
     # Hindi
@@ -99,8 +109,8 @@ KEYWORDS_EVACUATION = [
 
 KEYWORDS_URGENT = [
     # English
-    "water rising", "waist deep", "chest high", "danger mark", "submerged cars", "stranded bus", "no power", "current",
-    "dangerously", "deluge", "submerged",
+    "water rising", "waist deep", "chest high", "danger mark", "submerged cars", "stranded bus",
+    "no power", "current", "dangerously", "deluge", "submerged",
     # Marathi
     "धोकादायक", "छातीभर पाणी", "नाला ओसंडून", "गाड्या बुडाल्या", "रस्ता बंद", "वीज पुरवठा खंडित", "पाणी वाढतेय",
     # Hindi
@@ -109,8 +119,9 @@ KEYWORDS_URGENT = [
 
 KEYWORDS_WATERLOGGING = [
     # English
-    "waterlogging", "waterlogged", "water logging", "traffic moving slow", "stalled", "knee deep", "knee height", "rain",
-    "overflow", "puddle", "flooded", "flooding", "subway closed", "water level", "heavy rains", "water on road",
+    "waterlogging", "waterlogged", "water logging", "traffic moving slow", "stalled", "knee deep",
+    "knee height", "rain", "overflow", "puddle", "flooded", "flooding", "subway closed",
+    "water level", "heavy rains", "water on road",
     # Marathi
     "पाणी साचले", "साचलेले पाणी", "पाणी भरले", "वाहतूक धिम्या गतीने", "गुडघाभर पाणी", "मुसळधार", "पाणी शिरले", "पाऊस",
     # Hindi
@@ -124,33 +135,33 @@ class SocialNLPClassifier:
     Detects language, extracts locations, evaluates classification, and produces calibrated urgency scores.
     """
 
-    MODEL_NAME = "v1.0.0-indicbert-flood-urgency"
+    MODEL_NAME = "heuristic-indic-urgency-v1"
 
     def detect_language(self, text: str) -> str:
-        """
-        Determines language between Marathi, Hindi, or English using Devanagari script markers.
-        """
-        devanagari_chars = re.findall(r'[\u0900-\u097F]', text)
+        """Determines language between Marathi ('mr'), Hindi ('hi'), or English ('en')."""
+        devanagari_chars = re.findall(r"[\u0900-\u097F]", text)
         if not devanagari_chars:
             return "en"
 
         text_lower = text.lower()
-        marathi_markers = ["आहे", "नाही", "साचले", "पाणी", "वाचवा", "रस्ता", "झाले", "होते", "मध्ये"]
+        marathi_markers = [
+            "आहे", "नाही", "साचले", "पाणी", "वाचवा", "रस्ता", "झाले", "होते",
+            "मध्ये", "तुंबले", "भरले", "येथे", "विभागात",
+        ]
         if any(m in text_lower for m in marathi_markers):
             return "mr"
 
         return "hi"
 
     def extract_landmarks(self, text: str) -> Tuple[List[str], Optional[str]]:
-        """
-        Extracts Mumbai landmarks from text and associates with corresponding ward ID.
-        """
+        """Extracts Mumbai landmarks from text and associates with corresponding ward ID."""
         text_lower = text.lower()
-        detected_landmarks = []
-        resolved_ward = None
+        detected_landmarks: List[str] = []
+        resolved_ward: Optional[str] = None
 
         for landmark_key, (ward_id, canonical) in MUMBAI_LANDMARK_MAP.items():
-            if landmark_key in text_lower:
+            pattern = rf"(?<!\w){re.escape(landmark_key)}(?!\w)"
+            if re.search(pattern, text_lower):
                 if canonical not in detected_landmarks:
                     detected_landmarks.append(canonical)
                 if resolved_ward is None:
@@ -158,14 +169,34 @@ class SocialNLPClassifier:
 
         return detected_landmarks, resolved_ward
 
-    def classify_text(self, text: str, explicit_ward: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Runs multilingual sentiment, keyword scoring, and urgency classification.
-        """
-        lang = self.detect_language(text)
-        text_lower = text.lower()
+    def classify_text(self, text: Optional[str], explicit_ward: Optional[str] = None) -> Dict[str, Any]:
+        """Runs multilingual sentiment, keyword scoring, landmark extraction, and urgency classification."""
+        now_ts = datetime.now(timezone.utc).isoformat()
+        if not text or len(text.strip()) < 3:
+            return {
+                "language": "und" if text else "en",
+                "classification": "noise",
+                "urgency_score": 0.10,
+                "confidence": 0.40,
+                "is_flood_related": False,
+                "is_waterlogging": False,
+                "extracted_landmarks": [],
+                "ward_id": explicit_ward,
+                "location_name": None,
+                "model_version": self.MODEL_NAME,
+                "processed_at": now_ts,
+                "explanation": "Text content is empty or too short for classification.",
+                "provenance": {
+                    "method": "heuristic_indic_urgency",
+                    "disclaimer": "Heuristic lexical analysis; not an official confirmation.",
+                },
+            }
 
-        landmarks, auto_ward = self.extract_landmarks(text)
+        text_raw = text.strip()
+        text_lower = text_raw.lower()
+        lang = self.detect_language(text_raw)
+
+        landmarks, auto_ward = self.extract_landmarks(text_raw)
         final_ward = explicit_ward or auto_ward
 
         # Evaluate against priority tiers
@@ -176,33 +207,48 @@ class SocialNLPClassifier:
         if is_evac:
             classification = "evacuation_needed"
             urgency_score = 0.92
-            confidence = 0.94
+            confidence = 0.90
+            explanation = "Urgent distress or rescue request detected."
         elif is_urgent:
             classification = "urgent"
             urgency_score = 0.74
-            confidence = 0.88
+            confidence = 0.85
+            explanation = "Rising water, road closures, or hazardous inundation reported."
         elif is_waterlogging:
             classification = "waterlogging"
             urgency_score = 0.48
-            confidence = 0.82
+            confidence = 0.80
+            explanation = "Traffic slowdown or waterlogging condition reported."
         else:
             classification = "noise"
             urgency_score = 0.12
             confidence = 0.70
+            explanation = "No explicit flood or waterlogging indicators found."
 
-        # Adjust score if explicit landmarks detected
+        # Boost urgency slightly if explicit Mumbai landmarks are verified
         if landmarks and urgency_score > 0.3:
             urgency_score = min(0.99, round(urgency_score + 0.05, 2))
+
+        is_flood_related = classification in ("evacuation_needed", "urgent", "waterlogging")
 
         return {
             "language": lang,
             "classification": classification,
             "urgency_score": round(urgency_score, 2),
-            "confidence": confidence,
+            "confidence": round(confidence, 2),
+            "is_flood_related": is_flood_related,
+            "is_waterlogging": is_waterlogging,
             "extracted_landmarks": landmarks,
             "ward_id": final_ward,
             "location_name": landmarks[0] if landmarks else None,
-            "model_version": self.MODEL_NAME
+            "model_version": self.MODEL_NAME,
+            "processed_at": now_ts,
+            "explanation": explanation,
+            "provenance": {
+                "method": "heuristic_indic_urgency",
+                "extracted_ward_id": auto_ward,
+                "disclaimer": "Heuristic lexical analysis; not an official confirmation.",
+            },
         }
 
 

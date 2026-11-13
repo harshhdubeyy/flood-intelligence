@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.database import get_db
 from backend.models.ward import Ward
 from backend.models.risk import WardRiskScore
+from backend.services.report_intelligence import ReportIntelligenceEngine
 from backend.schemas.ward import (
     WardResponse,
     GeoJSONFeatureCollection,
@@ -204,11 +205,13 @@ async def get_ward_detail(ward_id: str, db: AsyncSession = Depends(get_db)) -> W
 )
 async def get_ward_risk_history(
     ward_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> WardRiskHistoryResponse:
     """
     Fetch 24-hour time series of 15-minute ML risk scores for sparklines and analysis.
+    Includes citizen report intelligence as an independent overlay signal.
     """
+    engine = ReportIntelligenceEngine(db)
     ward_stmt = select(Ward).where(Ward.ward_id == ward_id)
     res = await db.execute(ward_stmt)
     ward = res.scalar_one_or_none()
@@ -231,6 +234,20 @@ async def get_ward_risk_history(
     current_score = history_rows[0].risk_score if history_rows else 0.15
     current_class = history_rows[0].risk_class if history_rows else "low"
 
+    # Citizen intelligence overlay (independent from ML risk score)
+    intel = await engine.calculate_ward_intelligence_score(ward_id)
+    citizen_intel = None
+    if intel:
+        citizen_intel = {
+            "intelligence_score": intel["intelligence_score"],
+            "intelligence_class": intel["intelligence_class"],
+            "report_count": intel["report_count"],
+            "cv_verified_count": intel["cv_verified_count"],
+            "duplicate_count": intel["duplicate_count"],
+            "latest_incident": intel["latest_incident"].isoformat() if intel["latest_incident"] else None,
+            "model_version": intel["model_version"],
+        }
+
     return WardRiskHistoryResponse(
         ward_id=ward.ward_id,
         ward_name=ward.ward_name,
@@ -245,5 +262,6 @@ async def get_ward_risk_history(
                 inputs_json=h.inputs_json
             )
             for h in history_rows
-        ]
+        ],
+        citizen_intelligence=citizen_intel,
     )
